@@ -14,7 +14,7 @@ try:
     from allauth.account.adapter import get_adapter
     from allauth.account.utils import setup_user_email
     from allauth.socialaccount.helpers import complete_social_login
-    from allauth.socialaccount.models import SocialAccount, EmailAddress
+    from allauth.socialaccount.models import SocialAccount, EmailAddress, SocialApp
     from allauth.socialaccount.providers.base import AuthProcess
     from allauth.utils import get_username_max_length
 except ImportError:
@@ -92,7 +92,16 @@ class SocialLoginSerializer(serializers.Serializer):
             raise serializers.ValidationError(_('Define adapter_class in view'))
 
         adapter = adapter_class(request)
-        app = adapter.get_provider().app
+        provider = adapter.get_provider()
+        app = provider.app
+        if not app:
+            # If app is not set, try to get it from the database
+            try:
+                app = SocialApp.objects.get(provider=provider.id)
+            except SocialApp.DoesNotExist:
+                raise serializers.ValidationError(
+                    _('No SocialApp found for this provider. Please configure it in the admin.')
+                )
 
         # More info on code vs access_token
         # http://stackoverflow.com/questions/8666316/facebook-oauth-2-0-code-and-token
@@ -118,7 +127,6 @@ class SocialLoginSerializer(serializers.Serializer):
                     _('Define client_class in view'),
                 )
 
-            provider = adapter.get_provider()
             scope = provider.get_scope()
             client = self.client_class(
                 request,
@@ -151,10 +159,6 @@ class SocialLoginSerializer(serializers.Serializer):
 
         social_token = adapter.parse_token(tokens_to_parse)
         social_token.app = app
-
-        # Ensure the SocialApp is saved
-        if not app.pk:
-            app.save()
 
         try:
             if adapter.provider_id == 'google' and not code:
